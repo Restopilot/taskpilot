@@ -20,12 +20,17 @@ const PRIORITIES = [
   { id:"critical", label:"Critique", clr:"#ef4444" },
 ];
 const ENT_COLORS = ["#8b5cf6","#3b82f6","#f59e0b","#22c55e","#ec4899","#14b8a6","#f97316","#6366f1"];
-const ICONS = ["🏢","⚙️","📊","👥","🍳","🍽️","💰","🚚","🌐","📦","🔧","💻","🎯","🏆","📋","🔒"];
+const ICONS = [
+  "🍽️","🍳","🧑‍🍳","🥂","🍷","☕","🛎️","🧾",
+  "🏠","🏗️","🔑","📐","🏘️","🏢","💶","📝",
+  "🎓","📚","🧑‍🏫","📋","✏️","🏆","🎯","💡",
+  "👥","📊","💰","📱","🌐","⚙️","🔒","📦",
+];
 const INIT_ENTS = [
-  { id:"e1", name:"Direction",   color:"#8b5cf6", icon:"🏢" },
-  { id:"e2", name:"Opérations",  color:"#3b82f6", icon:"⚙️" },
-  { id:"e3", name:"Commercial",  color:"#f59e0b", icon:"📊" },
-  { id:"e4", name:"RH",          color:"#22c55e", icon:"👥" },
+  { id:"e1", name:"Restaurant",   color:"#f59e0b", icon:"🍽️" },
+  { id:"e2", name:"Immobilier",   color:"#3b82f6", icon:"🏠" },
+  { id:"e3", name:"Formation",    color:"#8b5cf6", icon:"🎓" },
+  { id:"e4", name:"Direction",    color:"#22c55e", icon:"💡" },
 ];
 
 // ── DB Layer ───────────────────────────────────────────────────────────────────
