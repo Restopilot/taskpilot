@@ -171,17 +171,17 @@ function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging}) {
   return (
     <div
       draggable
-      onDragStart={e=>{ e.dataTransfer.setData("taskId",task.id); onDragStart&&onDragStart(); }}
+      onDragStart={e=>{ e.dataTransfer.setData("taskId",task.id); e.dataTransfer.effectAllowed="move"; onDragStart&&onDragStart(); }}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.4:1,transition:"opacity 0.15s"}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10}}>
+      style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"opacity 0.15s",pointerEvents:isDragging?"none":"auto"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10,pointerEvents:"none"}}>
         <span style={{width:3,flexShrink:0,minHeight:18,alignSelf:"stretch",borderRadius:4,background:p?.clr||"#ccc",display:"inline-block"}}/>
         <span style={{fontSize:13,fontWeight:500,lineHeight:1.45,flex:1,color:T.text}}>{task.title}</span>
-        <span style={{fontSize:10,color:T.muted,cursor:"grab",flexShrink:0,marginTop:2}}>⠿</span>
+        <span style={{fontSize:10,color:T.muted,flexShrink:0,marginTop:2}}>⠿</span>
       </div>
-      {ent&&<div style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:500,background:ent.color+"15",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}25`}}>{ent.icon} {ent.name}</div>}
-      <div style={{display:"flex",alignItems:"center",gap:8}}>
+      {ent&&<div style={{pointerEvents:"none",display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:500,background:ent.color+"15",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}25`}}>{ent.icon} {ent.name}</div>}
+      <div style={{display:"flex",alignItems:"center",gap:8,pointerEvents:"none"}}>
         {task.dueDate&&<span style={{fontSize:11,color:od?T.red:T.muted}}>{od&&"⚠ "}{fmtDate(task.dueDate)}</span>}
         {(task.attachments||[]).length>0&&<span style={{fontSize:11,color:T.muted}}>📎 {task.attachments.length}</span>}
         {task.assignee&&<div style={{marginLeft:"auto",width:26,height:26,borderRadius:"50%",background:ent?.color+"20",border:`1.5px solid ${ent?.color||"#3b82f6"}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:ent?.color||"#3b82f6",flexShrink:0}}>{initials(task.assignee)}</div>}
@@ -195,28 +195,38 @@ function Kanban({tasks,entities,onOpen,dark,isMobile,onStatusChange}) {
   const T=mkT(dark);
   const [draggingId,setDraggingId]=useState(null);
   const [overCol,setOverCol]=useState(null);
+  const counters=useRef({});
+
+  const onDragEnter=(colId,e)=>{ e.preventDefault(); counters.current[colId]=(counters.current[colId]||0)+1; setOverCol(colId); };
+  const onDragLeave=(colId)=>{ counters.current[colId]=(counters.current[colId]||1)-1; if(counters.current[colId]<=0){ counters.current[colId]=0; setOverCol(p=>p===colId?null:p); } };
+  const onDrop=(colId,e)=>{ e.preventDefault(); counters.current[colId]=0; const id=e.dataTransfer.getData("taskId"); if(id) onStatusChange(id,colId); setOverCol(null); setDraggingId(null); };
+
   return (
     <div style={{display:"flex",flex:1,overflowX:"auto",overflowY:"hidden",WebkitOverflowScrolling:"touch"}}>
-      {STATUSES.map((s,i)=>{
+      {STATUSES.map((s)=>{
         const colTasks=tasks.filter(t=>t.status===s.id);
-        const isOver=overCol===s.id;
+        const isOver=overCol===s.id && draggingId && tasks.find(t=>t.id===draggingId)?.status!==s.id;
         return (
           <div key={s.id}
-            onDragOver={e=>{ e.preventDefault(); setOverCol(s.id); }}
-            onDragLeave={()=>setOverCol(null)}
-            onDrop={e=>{ e.preventDefault(); const id=e.dataTransfer.getData("taskId"); if(id) onStatusChange(id,s.id); setOverCol(null); setDraggingId(null); }}
-            style={{flexShrink:0,width:isMobile?290:undefined,flex:isMobile?"none":1,display:"flex",flexDirection:"column",borderRight:`1px solid ${T.border}`,minWidth:isMobile?290:190,transition:"background 0.15s",background:isOver?s.clr+"08":undefined}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px",flexShrink:0,borderBottom:`2px solid ${isOver?s.clr:s.clr}`,background:isOver?s.clr+"12":T.surf,transition:"background 0.15s"}}>
+            onDragOver={e=>e.preventDefault()}
+            onDragEnter={e=>onDragEnter(s.id,e)}
+            onDragLeave={()=>onDragLeave(s.id)}
+            onDrop={e=>onDrop(s.id,e)}
+            style={{flexShrink:0,width:isMobile?290:undefined,flex:isMobile?"none":1,display:"flex",flexDirection:"column",borderRight:`1px solid ${T.border}`,minWidth:isMobile?290:190,background:isOver?s.clr+"0a":undefined,transition:"background 0.12s"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px",flexShrink:0,borderBottom:`2px solid ${s.clr}`,background:isOver?s.clr+"14":T.surf,transition:"background 0.12s"}}>
               <span style={{width:8,height:8,borderRadius:"50%",background:s.clr,display:"inline-block"}}/>
               <span style={{fontSize:11,fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",color:T.text}}>{s.label}</span>
               <span style={{marginLeft:"auto",fontSize:11,background:s.clr+"18",color:s.clr,padding:"1px 8px",borderRadius:10,fontWeight:500}}>{colTasks.length}</span>
             </div>
-            <div style={{flex:1,overflowY:"auto",padding:"10px 10px 90px",display:"flex",flexDirection:"column",gap:8,background:T.bg,WebkitOverflowScrolling:"touch",minHeight:80}}>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 10px 90px",display:"flex",flexDirection:"column",gap:8,background:T.bg,WebkitOverflowScrolling:"touch",minHeight:100}}>
               {colTasks.map(t=>(
-                <TaskCard key={t.id} task={t} ent={entities.find(e=>e.id===t.entityId)} onClick={()=>{ if(draggingId) return; onOpen(t); }} dark={dark}
-                  onDragStart={()=>setDraggingId(t.id)} onDragEnd={()=>{ setDraggingId(null); setOverCol(null); }} isDragging={draggingId===t.id}/>
+                <TaskCard key={t.id} task={t} ent={entities.find(e=>e.id===t.entityId)}
+                  onClick={()=>{ if(draggingId) return; onOpen(t); }} dark={dark}
+                  onDragStart={()=>setDraggingId(t.id)}
+                  onDragEnd={()=>{ setDraggingId(null); setOverCol(null); Object.keys(counters.current).forEach(k=>counters.current[k]=0); }}
+                  isDragging={draggingId===t.id}/>
               ))}
-              {isOver&&draggingId&&<div style={{height:60,borderRadius:10,border:`2px dashed ${s.clr}`,background:s.clr+"08",flexShrink:0}}/>}
+              {isOver&&<div style={{height:54,borderRadius:10,border:`2px dashed ${s.clr}60`,background:s.clr+"08",flexShrink:0}}/>}
             </div>
           </div>
         );
@@ -536,14 +546,14 @@ export default function App() {
               </button>
               {entities.map(ent=>(
                 <div key={ent.id} draggable
-                  onDragStart={e=>e.dataTransfer.setData("entId",ent.id)}
+                  onDragStart={e=>{ e.dataTransfer.setData("entId",ent.id); e.dataTransfer.effectAllowed="move"; }}
                   onDragOver={e=>e.preventDefault()}
-                  onDrop={e=>{ e.preventDefault(); reorderEntities(e.dataTransfer.getData("entId"),ent.id); }}
+                  onDrop={e=>{ e.preventDefault(); e.stopPropagation(); reorderEntities(e.dataTransfer.getData("entId"),ent.id); }}
                   style={{display:"flex",alignItems:"center",cursor:"grab"}}>
-                  <span style={{color:SB.muted,fontSize:12,padding:"0 4px 0 10px",cursor:"grab",flexShrink:0}}>⠿</span>
-                  <button onClick={()=>sse(ent.id)} style={{display:"flex",alignItems:"center",gap:9,flex:1,padding:"9px 8px 9px 4px",background:selEnt===ent.id?SB.active:"transparent",border:"none",borderLeft:"none",color:selEnt===ent.id?ent.color:SB.text,fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer",textAlign:"left",transition:"all 0.12s"}}>
-                    <span style={{width:7,height:7,borderRadius:"50%",background:ent.color,flexShrink:0}}/><span style={{flex:1}}>{ent.icon} {ent.name}</span>
-                    <span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10}}>{tasks.filter(t=>t.entityId===ent.id).length}</span>
+                  <span style={{color:SB.muted,fontSize:12,padding:"0 4px 0 10px",flexShrink:0,pointerEvents:"none"}}>⠿</span>
+                  <button onClick={()=>sse(ent.id)} style={{display:"flex",alignItems:"center",gap:9,flex:1,padding:"9px 8px 9px 4px",background:selEnt===ent.id?SB.active:"transparent",border:"none",color:selEnt===ent.id?ent.color:SB.text,fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer",textAlign:"left",transition:"all 0.12s",pointerEvents:"auto"}}>
+                    <span style={{width:7,height:7,borderRadius:"50%",background:ent.color,flexShrink:0,pointerEvents:"none"}}/><span style={{flex:1,pointerEvents:"none"}}>{ent.icon} {ent.name}</span>
+                    <span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10,pointerEvents:"none"}}>{tasks.filter(t=>t.entityId===ent.id).length}</span>
                   </button>
                   <button onClick={()=>rmEntity(ent.id)} style={{background:"none",border:"none",color:SB.muted,cursor:"pointer",fontSize:15,padding:"4px 10px",opacity:0.6}}>&times;</button>
                 </div>
