@@ -174,14 +174,14 @@ function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging}) {
       onDragStart={e=>{ e.dataTransfer.setData("taskId",task.id); e.dataTransfer.effectAllowed="move"; onDragStart&&onDragStart(); }}
       onDragEnd={onDragEnd}
       onClick={onClick}
-      style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"opacity 0.15s",pointerEvents:isDragging?"none":"auto"}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10,pointerEvents:"none"}}>
+      style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"opacity 0.15s"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10,pointerEvents:isDragging?"none":"auto"}}>
         <span style={{width:3,flexShrink:0,minHeight:18,alignSelf:"stretch",borderRadius:4,background:p?.clr||"#ccc",display:"inline-block"}}/>
         <span style={{fontSize:13,fontWeight:500,lineHeight:1.45,flex:1,color:T.text}}>{task.title}</span>
         <span style={{fontSize:10,color:T.muted,flexShrink:0,marginTop:2}}>⠿</span>
       </div>
-      {ent&&<div style={{pointerEvents:"none",display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:500,background:ent.color+"15",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}25`}}>{ent.icon} {ent.name}</div>}
-      <div style={{display:"flex",alignItems:"center",gap:8,pointerEvents:"none"}}>
+      {ent&&<div style={{pointerEvents:isDragging?"none":"auto",display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:500,background:ent.color+"15",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}25`}}>{ent.icon} {ent.name}</div>}
+      <div style={{display:"flex",alignItems:"center",gap:8,pointerEvents:isDragging?"none":"auto"}}>
         {task.dueDate&&<span style={{fontSize:11,color:od?T.red:T.muted}}>{od&&"⚠ "}{fmtDate(task.dueDate)}</span>}
         {(task.attachments||[]).length>0&&<span style={{fontSize:11,color:T.muted}}>📎 {task.attachments.length}</span>}
         {task.assignee&&<div style={{marginLeft:"auto",width:26,height:26,borderRadius:"50%",background:ent?.color+"20",border:`1.5px solid ${ent?.color||"#3b82f6"}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:ent?.color||"#3b82f6",flexShrink:0}}>{initials(task.assignee)}</div>}
