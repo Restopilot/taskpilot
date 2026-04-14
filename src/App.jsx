@@ -231,11 +231,10 @@ function TaskFormModal({data,mode,entities,onSave,onClose,dark,isMobile}) {
   const T=mkT(dark);
   const [f,sf]=useState({title:"",desc:"",status:"todo",priority:"medium",dueDate:"",assignee:"",email:"",entityId:"",...data});
   const set=(k,v)=>sf(p=>({...p,[k]:v})); const ok=f.title.trim()&&f.entityId;
-  const G=({label,children})=><div style={{marginBottom:14}}><label style={mkLbl(T)}>{label}</label>{children}</div>;
   return (
     <Modal title={mode==="edit"?"Modifier la tâche":"Nouvelle tâche"} onClose={onClose} dark={dark} isMobile={isMobile}>
-      <G label="Titre *"><input value={f.title} onChange={e=>set("title",e.target.value)} placeholder="Intitulé..." style={mkInp(T)}/></G>
-      <G label="Description"><textarea value={f.desc} onChange={e=>set("desc",e.target.value)} rows={3} placeholder="Détails..." style={mkInp(T,{resize:"vertical"})}/></G>
+      <div style={{marginBottom:14}}><label style={mkLbl(T)}>Titre *</label><input value={f.title} onChange={e=>set("title",e.target.value)} placeholder="Intitulé..." style={mkInp(T)}/></div>
+      <div style={{marginBottom:14}}><label style={mkLbl(T)}>Description</label><textarea value={f.desc} onChange={e=>set("desc",e.target.value)} rows={3} placeholder="Détails..." style={mkInp(T,{resize:"vertical"})}/></div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
         <div><label style={mkLbl(T)}>Entité *</label><select value={f.entityId} onChange={e=>set("entityId",e.target.value)} style={mkInp(T,{cursor:"pointer"})}><option value="">— Choisir —</option>{entities.map(e=><option key={e.id} value={e.id}>{e.icon} {e.name}</option>)}</select></div>
         <div><label style={mkLbl(T)}>Statut</label><select value={f.status} onChange={e=>set("status",e.target.value)} style={mkInp(T,{cursor:"pointer"})}>{STATUSES.map(s=><option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
