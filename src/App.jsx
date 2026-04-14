@@ -166,15 +166,17 @@ function Modal({title,onClose,wide,dark,children,isMobile}) {
 }
 
 // ── Task Card (draggable) ──────────────────────────────────────────────────────
-function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging}) {
+function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging,onDropOnCard,isOver}) {
   const T=mkT(dark), p=PRIORITIES.find(x=>x.id===task.priority), od=isOD(task.dueDate,task.status);
   return (
     <div
       draggable
       onDragStart={e=>{ e.dataTransfer.setData("taskId",task.id); e.dataTransfer.effectAllowed="move"; onDragStart&&onDragStart(); }}
       onDragEnd={onDragEnd}
+      onDragOver={e=>{ e.preventDefault(); e.stopPropagation(); }}
+      onDrop={e=>{ e.preventDefault(); e.stopPropagation(); onDropOnCard&&onDropOnCard(e.dataTransfer.getData("taskId")); }}
       onClick={onClick}
-      style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"opacity 0.15s"}}>
+      style={{background:T.card,border:`2px solid ${isOver?T.blue:T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"all 0.12s"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10,pointerEvents:isDragging?"none":"auto"}}>
         <span style={{width:3,flexShrink:0,minHeight:18,alignSelf:"stretch",borderRadius:4,background:p?.clr||"#ccc",display:"inline-block"}}/>
         <span style={{fontSize:13,fontWeight:500,lineHeight:1.45,flex:1,color:T.text}}>{task.title}</span>
@@ -191,15 +193,29 @@ function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging}) {
 }
 
 // ── Kanban (drag & drop) ───────────────────────────────────────────────────────
-function Kanban({tasks,entities,onOpen,dark,isMobile,onStatusChange}) {
+function Kanban({tasks,entities,onOpen,dark,isMobile,onStatusChange,onReorder}) {
   const T=mkT(dark);
   const [draggingId,setDraggingId]=useState(null);
   const [overCol,setOverCol]=useState(null);
+  const [overCardId,setOverCardId]=useState(null);
   const counters=useRef({});
 
   const onDragEnter=(colId,e)=>{ e.preventDefault(); counters.current[colId]=(counters.current[colId]||0)+1; setOverCol(colId); };
   const onDragLeave=(colId)=>{ counters.current[colId]=(counters.current[colId]||1)-1; if(counters.current[colId]<=0){ counters.current[colId]=0; setOverCol(p=>p===colId?null:p); } };
-  const onDrop=(colId,e)=>{ e.preventDefault(); counters.current[colId]=0; const id=e.dataTransfer.getData("taskId"); if(id) onStatusChange(id,colId); setOverCol(null); setDraggingId(null); };
+  const onDrop=(colId,e)=>{ e.preventDefault(); counters.current[colId]=0; const id=e.dataTransfer.getData("taskId"); if(id) onStatusChange(id,colId); setOverCol(null); setOverCardId(null); setDraggingId(null); };
+
+  const handleDropOnCard=(targetId,fromId)=>{
+    if(!fromId||fromId===targetId) return;
+    const fromTask=tasks.find(t=>t.id===fromId);
+    const toTask=tasks.find(t=>t.id===targetId);
+    if(fromTask&&toTask&&fromTask.status===toTask.status){
+      onReorder(fromId,targetId);
+    } else if(fromTask&&toTask){
+      onStatusChange(fromId,toTask.status);
+    }
+    setOverCardId(null);
+    setDraggingId(null);
+  };
 
   return (
     <div style={{display:"flex",flex:1,overflowX:"auto",overflowY:"hidden",WebkitOverflowScrolling:"touch"}}>
@@ -223,8 +239,10 @@ function Kanban({tasks,entities,onOpen,dark,isMobile,onStatusChange}) {
                 <TaskCard key={t.id} task={t} ent={entities.find(e=>e.id===t.entityId)}
                   onClick={()=>{ if(draggingId) return; onOpen(t); }} dark={dark}
                   onDragStart={()=>setDraggingId(t.id)}
-                  onDragEnd={()=>{ setDraggingId(null); setOverCol(null); Object.keys(counters.current).forEach(k=>counters.current[k]=0); }}
-                  isDragging={draggingId===t.id}/>
+                  onDragEnd={()=>{ setDraggingId(null); setOverCol(null); setOverCardId(null); Object.keys(counters.current).forEach(k=>counters.current[k]=0); }}
+                  isDragging={draggingId===t.id}
+                  isOver={overCardId===t.id&&draggingId!==t.id}
+                  onDropOnCard={(fromId)=>handleDropOnCard(t.id,fromId)}/>
               ))}
               {isOver&&<div style={{height:54,borderRadius:10,border:`2px dashed ${s.clr}60`,background:s.clr+"08",flexShrink:0}}/>}
             </div>
@@ -503,6 +521,7 @@ export default function App() {
   };
   const addEntity=async data=>{ const e={...data,id:"e"+uid()}; se(p=>[...p,e]); await dbAddEntity(e); sef(false); notify("Entité créée ✓"); };
   const rmEntity=async id=>{ se(p=>p.filter(e=>e.id!==id)); st(p=>p.filter(t=>t.entityId!==id)); if(selEnt===id)sse(null); await dbDeleteEntity(id); notify("Entité supprimée"); };
+  const reorderTasks=(fromId,toId)=>{ if(fromId===toId) return; st(p=>{ const a=[...p]; const fi=a.findIndex(t=>t.id===fromId); const ti=a.findIndex(t=>t.id===toId); const [m]=a.splice(fi,1); a.splice(ti,0,m); return a; }); };
   const reorderEntities=(fromId,toId)=>{ if(fromId===toId) return; se(p=>{ const a=[...p]; const fi=a.findIndex(e=>e.id===fromId); const ti=a.findIndex(e=>e.id===toId); const [m]=a.splice(fi,1); a.splice(ti,0,m); return a; }); };
   const doAlert=async(email,msg)=>{ ss(true); try{ await sendEmail(detail,entities.find(e=>e.id===detail.entityId),email,msg); sa(false); notify(`Alerte envoyée à ${email} ✓`); }catch(e){ notify("Erreur d'envoi : "+e.message,true); } ss(false); };
 
@@ -601,7 +620,7 @@ export default function App() {
             <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:10,background:T.bg,paddingBottom:isMobile?80:0}}>
               <div style={{fontSize:44}}>📋</div><div style={{fontSize:16,fontWeight:600,color:T.sub}}>Aucune tâche</div><div style={{fontSize:13,color:T.muted}}>Créez votre première tâche</div>
             </div>
-          ):view==="kanban"?<Kanban tasks={filtered} entities={entities} onOpen={sd} dark={dark} isMobile={isMobile} onStatusChange={(id,s)=>setStatus(id,s)}/>:<ListView tasks={filtered} entities={entities} onOpen={sd} dark={dark}/> }
+          ):view==="kanban"?<Kanban tasks={filtered} entities={entities} onOpen={sd} dark={dark} isMobile={isMobile} onStatusChange={(id,s)=>setStatus(id,s)} onReorder={reorderTasks}/>:<ListView tasks={filtered} entities={entities} onOpen={sd} dark={dark}/> }
         </div>
       </div>
 
