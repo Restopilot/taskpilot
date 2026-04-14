@@ -84,20 +84,32 @@ async function dbUpdateTask(id, patch) {
   await supabase.from("tasks").update(row).eq("id", id);
 }
 
-// ── Gmail Alert ────────────────────────────────────────────────────────────────
-async function sendGmailAlert(task, entity, toEmail, msg) {
+// ── Storage upload ─────────────────────────────────────────────────────────────
+async function uploadFile(file) {
+  if (!supabase) return { id:uid(), name:file.name, size:file.size, type:file.type, url:null };
+  const path = `${uid()}-${file.name.replace(/[^a-zA-Z0-9._-]/g,"_")}`;
+  const { error } = await supabase.storage.from("attachments").upload(path, file);
+  if (error) throw error;
+  const { data:{ publicUrl } } = supabase.storage.from("attachments").getPublicUrl(path);
+  return { id:uid(), name:file.name, size:file.size, type:file.type, url:publicUrl, path };
+}
+
+async function deleteFile(path) {
+  if (!supabase || !path) return;
+  await supabase.storage.from("attachments").remove([path]);
+}
+
+// ── Email via Resend ───────────────────────────────────────────────────────────
+async function sendEmail(task, entity, toEmail, msg) {
   const st = STATUSES.find(s=>s.id===task.status)?.label||task.status;
   const pr = PRIORITIES.find(p=>p.id===task.priority)?.label||task.priority;
   const due = task.dueDate ? new Date(task.dueDate+"T00:00").toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"}) : "Non définie";
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const body = `Bonjour,\n\nAlerte TaskPilot :\n\nTâche : ${task.title}\nEntité : ${entity?.name||"N/A"}\nPriorité : ${pr}\nStatut : ${st}\nÉchéance : ${due}\nAssigné à : ${task.assignee||"Non assigné"}${msg?"\n\nMessage : "+msg:""}\n\nCordialement,\nTaskPilot`;
+  const res = await fetch("/api/send-email", {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({
-      model:"claude-sonnet-4-20250514", max_tokens:1000,
-      messages:[{ role:"user", content:`Envoie un email à ${toEmail} avec le sujet "[TaskPilot] Alerte — ${task.title}" et ce corps:\n\nBonjour,\n\nAlerte TaskPilot :\n\nTâche : ${task.title}\nEntité : ${entity?.name||"N/A"}\nPriorité : ${pr}\nStatut : ${st}\nÉchéance : ${due}\nAssigné à : ${task.assignee||"Non assigné"}${msg?"\n\nMessage : "+msg:""}\n\nCordialement,\nTaskPilot` }],
-      mcp_servers:[{ type:"url", url:"https://gmailmcp.googleapis.com/mcp/v1", name:"gmail" }],
-    }),
+    body: JSON.stringify({ to:toEmail, subject:`[TaskPilot] Alerte — ${task.title}`, body }),
   });
-  if (!res.ok) throw new Error("HTTP "+res.status);
+  if (!res.ok) { const d=await res.json(); throw new Error(d.error||"Erreur envoi"); }
   return res.json();
 }
 
@@ -290,15 +302,19 @@ function DetailModal({task,entities,onEdit,onDelete,onStatus,onAddFile,onRemoveF
         {(task.attachments||[]).map(a=>(
           <div key={a.id} style={{display:"flex",alignItems:"center",gap:8,background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",marginBottom:6}}>
             <span style={{fontSize:18}}>{fileIco(a.type)}</span>
-            <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:12,fontWeight:500,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div><div style={{fontSize:10,color:T.muted}}>{fileSz(a.size)}</div></div>
-            <button onClick={()=>onRemoveFile(a.id)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:18,padding:"4px 8px",minHeight:36}}>&times;</button>
+            <div style={{flex:1,overflow:"hidden"}}>
+              {a.url ? <a href={a.url} target="_blank" rel="noreferrer" style={{fontSize:12,fontWeight:500,color:T.blue,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"block",textDecoration:"none"}}>{a.name} ↗</a>
+                : <div style={{fontSize:12,fontWeight:500,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>}
+              <div style={{fontSize:10,color:T.muted}}>{fileSz(a.size)}</div>
+            </div>
+            <button onClick={()=>onRemoveFile(a.id,a.path)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:18,padding:"4px 8px",minHeight:36}}>&times;</button>
           </div>
         ))}
-        <input type="file" multiple ref={fileRef} style={{display:"none"}} onChange={e=>{[...e.target.files].forEach(f=>onAddFile({id:uid(),name:f.name,size:f.size,type:f.type}));e.target.value="";}}/>
+        <input type="file" multiple ref={fileRef} style={{display:"none"}} onChange={e=>{onAddFile([...e.target.files]);e.target.value="";}}/>
         <Btn sm onClick={()=>fileRef.current?.click()} dark={dark}>+ Ajouter un fichier</Btn>
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:8,paddingTop:14,borderTop:`1px solid ${T.border}`}}>
-        <Btn primary onClick={onAlert} dark={dark} full>✉️ Envoyer une alerte Gmail</Btn>
+        <Btn primary onClick={onAlert} dark={dark} full>✉️ Envoyer une alerte email</Btn>
         <div style={{display:"flex",gap:8}}><Btn onClick={onEdit} dark={dark} style={{flex:1}}>✏️ Modifier</Btn><Btn danger onClick={onDelete} dark={dark} style={{flex:1}}>🗑️ Supprimer</Btn></div>
       </div>
     </Modal>
@@ -310,7 +326,7 @@ function AlertModal({task,entities,sending,onSend,onClose,dark,isMobile}) {
   const T=mkT(dark), ent=entities.find(e=>e.id===task.entityId);
   const [email,setEmail]=useState(task.email||""), [msg,setMsg]=useState("");
   return (
-    <Modal title="Alerte Gmail" onClose={onClose} dark={dark} isMobile={isMobile}>
+    <Modal title="Envoyer une alerte email" onClose={onClose} dark={dark} isMobile={isMobile}>
       <div style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 13px",marginBottom:14,fontSize:13,color:T.sub}}><strong style={{color:T.text}}>{task.title}</strong> · {ent?.icon} {ent?.name||"—"}</div>
       <div style={{marginBottom:13}}><label style={mkLbl(T)}>Destinataire *</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@exemple.com" style={mkInp(T)}/></div>
       <div style={{marginBottom:16}}><label style={mkLbl(T)}>Message (optionnel)</label><textarea value={msg} onChange={e=>setMsg(e.target.value)} rows={3} style={mkInp(T,{resize:"vertical"})}/></div>
@@ -435,22 +451,26 @@ export default function App() {
   };
   const delTask=async id=>{ st(p=>p.filter(t=>t.id!==id)); sd(null); await dbDeleteTask(id); notify("Tâche supprimée"); };
   const setStatus=async(id,s)=>{ st(p=>p.map(t=>t.id===id?{...t,status:s}:t)); if(detail?.id===id)sd(p=>({...p,status:s})); await dbUpdateTask(id,{status:s}); };
-  const addFile=async(id,f)=>{
-    const newAtts=tasks.find(t=>t.id===id)?.attachments||[];
-    newAtts.push(f);
-    st(p=>p.map(t=>t.id===id?{...t,attachments:newAtts}:t));
-    if(detail?.id===id)sd(p=>({...p,attachments:newAtts}));
-    await dbUpdateTask(id,{attachments:newAtts});
+  const addFile=async(id,files)=>{
+    notify("Upload en cours...");
+    try {
+      const uploaded = await Promise.all(files.map(f=>uploadFile(f)));
+      const newAtts=[...(tasks.find(t=>t.id===id)?.attachments||[]),...uploaded];
+      st(p=>p.map(t=>t.id===id?{...t,attachments:newAtts}:t));
+      if(detail?.id===id)sd(p=>({...p,attachments:newAtts}));
+      await dbUpdateTask(id,{attachments:newAtts});
+      notify(`${uploaded.length} fichier(s) ajouté(s) ✓`);
+    } catch(e) { notify("Erreur upload — "+e.message,true); }
   };
-  const rmFile=async(id,fid)=>{
+  const rmFile=async(id,fid,path)=>{
     const newAtts=(tasks.find(t=>t.id===id)?.attachments||[]).filter(a=>a.id!==fid);
     st(p=>p.map(t=>t.id===id?{...t,attachments:newAtts}:t));
     if(detail?.id===id)sd(p=>({...p,attachments:newAtts}));
-    await dbUpdateTask(id,{attachments:newAtts});
+    await Promise.all([dbUpdateTask(id,{attachments:newAtts}), deleteFile(path)]);
   };
   const addEntity=async data=>{ const e={...data,id:"e"+uid()}; se(p=>[...p,e]); await dbAddEntity(e); sef(false); notify("Entité créée ✓"); };
   const rmEntity=async id=>{ se(p=>p.filter(e=>e.id!==id)); st(p=>p.filter(t=>t.entityId!==id)); if(selEnt===id)sse(null); await dbDeleteEntity(id); notify("Entité supprimée"); };
-  const doAlert=async(email,msg)=>{ ss(true); try{ await sendGmailAlert(detail,entities.find(e=>e.id===detail.entityId),email,msg); sa(false); notify(`Alerte envoyée à ${email} ✓`); }catch{ notify("Erreur d'envoi — vérifiez Gmail",true); } ss(false); };
+  const doAlert=async(email,msg)=>{ ss(true); try{ await sendEmail(detail,entities.find(e=>e.id===detail.entityId),email,msg); sa(false); notify(`Alerte envoyée à ${email} ✓`); }catch(e){ notify("Erreur d'envoi : "+e.message,true); } ss(false); };
 
   if(loading) return (
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#16202e",flexDirection:"column",gap:12}}>
@@ -560,7 +580,7 @@ export default function App() {
       )}
 
       {taskForm&&<TaskFormModal data={taskForm.data} mode={taskForm.mode} entities={entities} onSave={saveTask} onClose={()=>stf(null)} dark={dark} isMobile={isMobile}/>}
-      {detail&&<DetailModal task={detail} entities={entities} onEdit={()=>{stf({mode:"edit",data:{...detail}});sd(null);}} onDelete={()=>delTask(detail.id)} onStatus={s=>setStatus(detail.id,s)} onAddFile={f=>addFile(detail.id,f)} onRemoveFile={id=>rmFile(detail.id,id)} onClose={()=>sd(null)} onAlert={()=>sa(true)} dark={dark} isMobile={isMobile}/>}
+      {detail&&<DetailModal task={detail} entities={entities} onEdit={()=>{stf({mode:"edit",data:{...detail}});sd(null);}} onDelete={()=>delTask(detail.id)} onStatus={s=>setStatus(detail.id,s)} onAddFile={files=>addFile(detail.id,files)} onRemoveFile={(fid,path)=>rmFile(detail.id,fid,path)} onClose={()=>sd(null)} onAlert={()=>sa(true)} dark={dark} isMobile={isMobile}/> }
       {entForm&&<EntityModal onSave={addEntity} onClose={()=>sef(false)} dark={dark} isMobile={isMobile}/>}
       {alertOpen&&detail&&<AlertModal task={detail} entities={entities} sending={sending} onSend={doAlert} onClose={()=>sa(false)} dark={dark} isMobile={isMobile}/>}
 
