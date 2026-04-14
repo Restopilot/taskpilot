@@ -1,4 +1,10 @@
 import { useState, useEffect, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ── Supabase ───────────────────────────────────────────────────────────────────
+const SUPA_URL  = import.meta.env.VITE_SUPABASE_URL  || "";
+const SUPA_KEY  = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const supabase  = SUPA_URL && SUPA_KEY ? createClient(SUPA_URL, SUPA_KEY) : null;
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const STATUSES = [
@@ -21,22 +27,64 @@ const INIT_ENTS = [
   { id:"e3", name:"Commercial",  color:"#f59e0b", icon:"📊" },
   { id:"e4", name:"RH",          color:"#22c55e", icon:"👥" },
 ];
-const now = Date.now();
-const INIT_TASKS = [
-  { id:"t1", entityId:"e1", title:"Révision budget Q2",        desc:"Analyser les dépenses du trimestre et préparer le rapport pour le conseil d'administration.", status:"progress", priority:"high",     dueDate:"2026-04-30", assignee:"M. Dupont",  email:"", attachments:[], createdAt:now },
-  { id:"t2", entityId:"e2", title:"Maintenance équipements",   desc:"Vérification hebdomadaire et rapport de conformité.", status:"todo",     priority:"medium",   dueDate:"2026-04-20", assignee:"P. Martin",  email:"", attachments:[], createdAt:now },
-  { id:"t3", entityId:"e3", title:"Appel client Grand Hôtel",  desc:"Présentation de l'offre premium 2026 et négociation du contrat annuel.", status:"done",     priority:"critical", dueDate:"2026-04-15", assignee:"S. Laurent", email:"", attachments:[], createdAt:now },
-  { id:"t4", entityId:"e4", title:"Entretiens chef de partie", desc:"3 candidats sélectionnés pour le poste vacant. Entretiens à planifier.", status:"blocked",  priority:"high",     dueDate:"2026-04-22", assignee:"J. Petit",   email:"", attachments:[], createdAt:now },
-  { id:"t5", entityId:"e2", title:"Inventaire stockroom",      desc:"Comptage mensuel et mise à jour du système ERP.", status:"todo",     priority:"low",      dueDate:"2026-05-01", assignee:"L. Bernard", email:"", attachments:[], createdAt:now },
-];
 
-// ── Storage & API ──────────────────────────────────────────────────────────────
-async function loadData() {
-  try { const r = await window.storage?.get("tp-v3"); return r ? JSON.parse(r.value) : null; } catch { return null; }
+// ── DB Layer ───────────────────────────────────────────────────────────────────
+const LS_KEY = "tp-v3";
+function lsLoad() {
+  try { const v=localStorage.getItem(LS_KEY); return v?JSON.parse(v):null; } catch { return null; }
 }
-async function saveData(d) {
-  try { await window.storage?.set("tp-v3", JSON.stringify(d)); } catch {}
+function lsSave(d) {
+  try { localStorage.setItem(LS_KEY,JSON.stringify(d)); } catch {}
 }
+
+async function dbLoadAll() {
+  if (!supabase) {
+    const d = lsLoad();
+    return d || { entities: INIT_ENTS, tasks: [] };
+  }
+  const [{ data: ents }, { data: tsks }] = await Promise.all([
+    supabase.from("entities").select("*").order("created_at"),
+    supabase.from("tasks").select("*").order("created_at"),
+  ]);
+  const entities = (ents||[]).map(e => ({ id:e.id, name:e.name, color:e.color, icon:e.icon }));
+  const tasks = (tsks||[]).map(t => ({
+    id:t.id, entityId:t.entity_id, title:t.title, desc:t.description||"",
+    status:t.status, priority:t.priority, dueDate:t.due_date||"",
+    assignee:t.assignee||"", email:t.email||"",
+    attachments:t.attachments||[], createdAt:new Date(t.created_at).getTime(),
+  }));
+  return { entities: entities.length ? entities : INIT_ENTS, tasks };
+}
+
+async function dbAddEntity(ent) {
+  if (!supabase) return;
+  await supabase.from("entities").insert({ id:ent.id, name:ent.name, color:ent.color, icon:ent.icon });
+}
+async function dbDeleteEntity(id) {
+  if (!supabase) return;
+  await supabase.from("entities").delete().eq("id", id);
+}
+async function dbUpsertTask(t) {
+  if (!supabase) return;
+  await supabase.from("tasks").upsert({
+    id:t.id, entity_id:t.entityId, title:t.title, description:t.desc||"",
+    status:t.status, priority:t.priority, due_date:t.dueDate||"",
+    assignee:t.assignee||"", email:t.email||"", attachments:t.attachments||[],
+  });
+}
+async function dbDeleteTask(id) {
+  if (!supabase) return;
+  await supabase.from("tasks").delete().eq("id", id);
+}
+async function dbUpdateTask(id, patch) {
+  if (!supabase) return;
+  const row = {};
+  if (patch.status !== undefined)      row.status      = patch.status;
+  if (patch.attachments !== undefined) row.attachments = patch.attachments;
+  await supabase.from("tasks").update(row).eq("id", id);
+}
+
+// ── Gmail Alert ────────────────────────────────────────────────────────────────
 async function sendGmailAlert(task, entity, toEmail, msg) {
   const st = STATUSES.find(s=>s.id===task.status)?.label||task.status;
   const pr = PRIORITIES.find(p=>p.id===task.priority)?.label||task.priority;
@@ -186,7 +234,7 @@ function TaskFormModal({data,mode,entities,onSave,onClose,dark,isMobile}) {
   const G=({label,children})=><div style={{marginBottom:14}}><label style={mkLbl(T)}>{label}</label>{children}</div>;
   return (
     <Modal title={mode==="edit"?"Modifier la tâche":"Nouvelle tâche"} onClose={onClose} dark={dark} isMobile={isMobile}>
-      <G label="Titre *"><input value={f.title} onChange={e=>set("title",e.target.value)} placeholder="Intitulé..." style={mkInp(T)} autoFocus={!isMobile}/></G>
+      <G label="Titre *"><input value={f.title} onChange={e=>set("title",e.target.value)} placeholder="Intitulé..." style={mkInp(T)}/></G>
       <G label="Description"><textarea value={f.desc} onChange={e=>set("desc",e.target.value)} rows={3} placeholder="Détails..." style={mkInp(T,{resize:"vertical"})}/></G>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
         <div><label style={mkLbl(T)}>Entité *</label><select value={f.entityId} onChange={e=>set("entityId",e.target.value)} style={mkInp(T,{cursor:"pointer"})}><option value="">— Choisir —</option>{entities.map(e=><option key={e.id} value={e.id}>{e.icon} {e.name}</option>)}</select></div>
@@ -222,16 +270,12 @@ function DetailModal({task,entities,onEdit,onDelete,onStatus,onAddFile,onRemoveF
         </div>
       </div>
       {task.desc&&<div style={{background:T.card2,borderRadius:8,padding:"12px",marginBottom:14,fontSize:13,color:T.sub,lineHeight:1.7,border:`1px solid ${T.border}`}}>{task.desc}</div>}
-      {/* Status */}
       <div style={{marginBottom:14}}>
         <div style={{fontSize:11,color:T.muted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Statut</div>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {STATUSES.map(st=>(
-            <button key={st.id} onClick={()=>onStatus(st.id)} style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${task.status===st.id?st.clr+"60":"transparent"}`,cursor:"pointer",fontSize:12,fontWeight:600,background:task.status===st.id?st.clr+"18":"transparent",color:task.status===st.id?st.clr:T.muted,transition:"all 0.12s",minHeight:38}}>{st.label}</button>
-          ))}
+          {STATUSES.map(st=>(<button key={st.id} onClick={()=>onStatus(st.id)} style={{padding:"8px 14px",borderRadius:8,border:`1px solid ${task.status===st.id?st.clr+"60":"transparent"}`,cursor:"pointer",fontSize:12,fontWeight:600,background:task.status===st.id?st.clr+"18":"transparent",color:task.status===st.id?st.clr:T.muted,transition:"all 0.12s",minHeight:38}}>{st.label}</button>))}
         </div>
       </div>
-      {/* Meta */}
       <div style={{background:T.card2,borderRadius:10,padding:"0 14px",marginBottom:14,border:`1px solid ${T.border}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
           <span style={{fontSize:12,color:T.muted,fontWeight:500}}>Échéance</span>
@@ -239,37 +283,24 @@ function DetailModal({task,entities,onEdit,onDelete,onStatus,onAddFile,onRemoveF
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0"}}>
           <span style={{fontSize:12,color:T.muted,fontWeight:500}}>Assigné à</span>
-          {task.assignee ? (
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:26,height:26,borderRadius:"50%",background:ent?.color+"20",border:`1.5px solid ${ent?.color||"#3b82f6"}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:ent?.color||"#3b82f6"}}>{initials(task.assignee)}</div>
-              <span style={{fontSize:13,color:T.text,fontWeight:500}}>{task.assignee}</span>
-            </div>
-          ) : <span style={{fontSize:12,color:T.muted}}>Non assigné</span>}
+          {task.assignee?<div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:26,height:26,borderRadius:"50%",background:ent?.color+"20",border:`1.5px solid ${ent?.color||"#3b82f6"}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:ent?.color||"#3b82f6"}}>{initials(task.assignee)}</div><span style={{fontSize:13,color:T.text,fontWeight:500}}>{task.assignee}</span></div>:<span style={{fontSize:12,color:T.muted}}>Non assigné</span>}
         </div>
       </div>
-      {/* Attachments */}
       <div style={{marginBottom:14}}>
         <div style={{fontSize:11,color:T.muted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>Pièces jointes ({(task.attachments||[]).length})</div>
         {(task.attachments||[]).map(a=>(
           <div key={a.id} style={{display:"flex",alignItems:"center",gap:8,background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 10px",marginBottom:6}}>
             <span style={{fontSize:18}}>{fileIco(a.type)}</span>
-            <div style={{flex:1,overflow:"hidden"}}>
-              <div style={{fontSize:12,fontWeight:500,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div>
-              <div style={{fontSize:10,color:T.muted}}>{fileSz(a.size)}</div>
-            </div>
+            <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:12,fontWeight:500,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.name}</div><div style={{fontSize:10,color:T.muted}}>{fileSz(a.size)}</div></div>
             <button onClick={()=>onRemoveFile(a.id)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:18,padding:"4px 8px",minHeight:36}}>&times;</button>
           </div>
         ))}
         <input type="file" multiple ref={fileRef} style={{display:"none"}} onChange={e=>{[...e.target.files].forEach(f=>onAddFile({id:uid(),name:f.name,size:f.size,type:f.type}));e.target.value="";}}/>
         <Btn sm onClick={()=>fileRef.current?.click()} dark={dark}>+ Ajouter un fichier</Btn>
       </div>
-      {/* Actions */}
       <div style={{display:"flex",flexDirection:"column",gap:8,paddingTop:14,borderTop:`1px solid ${T.border}`}}>
         <Btn primary onClick={onAlert} dark={dark} full>✉️ Envoyer une alerte Gmail</Btn>
-        <div style={{display:"flex",gap:8}}>
-          <Btn onClick={onEdit} dark={dark} style={{flex:1}}>✏️ Modifier</Btn>
-          <Btn danger onClick={onDelete} dark={dark} style={{flex:1}}>🗑️ Supprimer</Btn>
-        </div>
+        <div style={{display:"flex",gap:8}}><Btn onClick={onEdit} dark={dark} style={{flex:1}}>✏️ Modifier</Btn><Btn danger onClick={onDelete} dark={dark} style={{flex:1}}>🗑️ Supprimer</Btn></div>
       </div>
     </Modal>
   );
@@ -281,9 +312,7 @@ function AlertModal({task,entities,sending,onSend,onClose,dark,isMobile}) {
   const [email,setEmail]=useState(task.email||""), [msg,setMsg]=useState("");
   return (
     <Modal title="Alerte Gmail" onClose={onClose} dark={dark} isMobile={isMobile}>
-      <div style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 13px",marginBottom:14,fontSize:13,color:T.sub}}>
-        <strong style={{color:T.text}}>{task.title}</strong> · {ent?.icon} {ent?.name||"—"}
-      </div>
+      <div style={{background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 13px",marginBottom:14,fontSize:13,color:T.sub}}><strong style={{color:T.text}}>{task.title}</strong> · {ent?.icon} {ent?.name||"—"}</div>
       <div style={{marginBottom:13}}><label style={mkLbl(T)}>Destinataire *</label><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="email@exemple.com" style={mkInp(T)}/></div>
       <div style={{marginBottom:16}}><label style={mkLbl(T)}>Message (optionnel)</label><textarea value={msg} onChange={e=>setMsg(e.target.value)} rows={3} style={mkInp(T,{resize:"vertical"})}/></div>
       <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:8,paddingTop:14,borderTop:`1px solid ${T.border}`,justifyContent:"flex-end"}}>
@@ -320,23 +349,18 @@ function Drawer({open,onClose,entities,tasks,selEnt,sse,dark,onNewEnt,onDelEnt,s
       <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:400}}/>
       <div style={{position:"fixed",top:0,left:0,bottom:0,width:270,background:SB.bg,zIndex:401,display:"flex",flexDirection:"column",animation:"slideRight 0.22s ease",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <div style={{padding:"20px 18px 14px",borderBottom:`1px solid ${SB.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div>
-            <div style={{fontSize:17,fontWeight:700,color:"#fff"}}>Task<span style={{color:"#3b82f6"}}>Pilot</span></div>
-            <div style={{fontSize:9,color:SB.muted,letterSpacing:"0.1em",marginTop:3,textTransform:"uppercase"}}>Gestion des tâches</div>
-          </div>
+          <div><div style={{fontSize:17,fontWeight:700,color:"#fff"}}>Task<span style={{color:"#3b82f6"}}>Pilot</span></div><div style={{fontSize:9,color:SB.muted,letterSpacing:"0.1em",marginTop:3,textTransform:"uppercase"}}>Gestion des tâches</div></div>
           <button onClick={onClose} style={{background:"none",border:"none",color:SB.muted,fontSize:22,cursor:"pointer",padding:"4px 8px",minHeight:36}}>&times;</button>
         </div>
         <div style={{flex:1,padding:"10px 0"}}>
           <div style={{padding:"8px 16px 4px",fontSize:9,fontWeight:600,color:SB.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>Entités</div>
           <button onClick={()=>{sse(null);onClose();}} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"13px 16px",background:selEnt===null?SB.active:"transparent",border:"none",borderLeft:selEnt===null?`3px solid ${SB.accent}`:"3px solid transparent",color:selEnt===null?"#fff":SB.text,fontFamily:"Inter,sans-serif",fontSize:14,cursor:"pointer",textAlign:"left"}}>
-            <span>📋</span><span style={{flex:1}}>Toutes les tâches</span>
-            <span style={{fontSize:11,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"2px 8px",borderRadius:10}}>{tasks.length}</span>
+            <span>📋</span><span style={{flex:1}}>Toutes les tâches</span><span style={{fontSize:11,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"2px 8px",borderRadius:10}}>{tasks.length}</span>
           </button>
           {entities.map(ent=>(
             <div key={ent.id} style={{display:"flex",alignItems:"center"}}>
               <button onClick={()=>{sse(ent.id);onClose();}} style={{display:"flex",alignItems:"center",gap:9,flex:1,padding:"13px 16px",background:selEnt===ent.id?SB.active:"transparent",border:"none",borderLeft:selEnt===ent.id?`3px solid ${ent.color}`:"3px solid transparent",color:selEnt===ent.id?ent.color:SB.text,fontFamily:"Inter,sans-serif",fontSize:14,cursor:"pointer",textAlign:"left"}}>
-                <span style={{width:8,height:8,borderRadius:"50%",background:ent.color,flexShrink:0}}/>
-                <span style={{flex:1}}>{ent.icon} {ent.name}</span>
+                <span style={{width:8,height:8,borderRadius:"50%",background:ent.color,flexShrink:0}}/><span style={{flex:1}}>{ent.icon} {ent.name}</span>
                 <span style={{fontSize:11,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"2px 8px",borderRadius:10}}>{tasks.filter(t=>t.entityId===ent.id).length}</span>
               </button>
               <button onClick={()=>onDelEnt(ent.id)} style={{background:"none",border:"none",color:SB.muted,cursor:"pointer",fontSize:18,padding:"4px 14px",minHeight:44}}>&times;</button>
@@ -345,12 +369,7 @@ function Drawer({open,onClose,entities,tasks,selEnt,sse,dark,onNewEnt,onDelEnt,s
           <button onClick={()=>{onNewEnt();onClose();}} style={{display:"flex",alignItems:"center",gap:8,width:"calc(100% - 20px)",margin:"8px 10px",padding:"10px 12px",borderRadius:8,cursor:"pointer",background:"transparent",border:`1px dashed ${SB.border}`,color:SB.muted,fontFamily:"Inter,sans-serif",fontSize:13}}>+ Nouvelle entité</button>
         </div>
         <div style={{padding:"10px 12px",borderTop:`1px solid ${SB.border}`,display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-          {STATUSES.map(s=>(
-            <div key={s.id} style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"8px 10px",border:`1px solid ${SB.border}`}}>
-              <div style={{fontSize:18,fontWeight:700,color:s.clr,lineHeight:1}}>{tasks.filter(t=>t.status===s.id).length}</div>
-              <div style={{fontSize:9,color:SB.muted,marginTop:3,fontWeight:500}}>{s.label}</div>
-            </div>
-          ))}
+          {STATUSES.map(s=>(<div key={s.id} style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"8px 10px",border:`1px solid ${SB.border}`}}><div style={{fontSize:18,fontWeight:700,color:s.clr,lineHeight:1}}>{tasks.filter(t=>t.status===s.id).length}</div><div style={{fontSize:9,color:SB.muted,marginTop:3,fontWeight:500}}>{s.label}</div></div>))}
         </div>
         <div style={{padding:"14px 16px",borderTop:`1px solid ${SB.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <span style={{fontSize:13,color:SB.muted}}>{dark?"Thème sombre":"Thème clair"}</span>
@@ -367,8 +386,9 @@ function Drawer({open,onClose,entities,tasks,selEnt,sse,dark,onNewEnt,onDelEnt,s
 export default function App() {
   const isMobile=useIsMobile();
   const [dark,setDark]=useState(false);
-  const [entities,se]=useState(INIT_ENTS);
-  const [tasks,st]=useState(INIT_TASKS);
+  const [entities,se]=useState([]);
+  const [tasks,st]=useState([]);
+  const [loading,sl]=useState(true);
   const [selEnt,sse]=useState(null);
   const [view,sv]=useState("kanban");
   const [taskForm,stf]=useState(null);
@@ -380,8 +400,24 @@ export default function App() {
   const [drawerOpen,sdr]=useState(false);
   const T=mkT(dark);
 
-  useEffect(()=>{ loadData().then(d=>{ if(d){ se(d.entities||INIT_ENTS); st(d.tasks||INIT_TASKS); } }); },[]);
-  useEffect(()=>{ saveData({entities,tasks}); },[entities,tasks]);
+  // Load on mount
+  useEffect(()=>{
+    dbLoadAll().then(({entities:e,tasks:t})=>{ se(e); st(t); sl(false); });
+  },[]);
+
+  // Sync to localStorage when no supabase
+  useEffect(()=>{ if(!supabase && !loading) lsSave({entities,tasks}); },[entities,tasks,loading]);
+
+  // Real-time subscription
+  useEffect(()=>{
+    if(!supabase) return;
+    const ch = supabase.channel("realtime-tasks")
+      .on("postgres_changes",{event:"*",schema:"public",table:"tasks"},()=>{ dbLoadAll().then(({tasks:t})=>st(t)); })
+      .on("postgres_changes",{event:"*",schema:"public",table:"entities"},()=>{ dbLoadAll().then(({entities:e})=>se(e)); })
+      .subscribe();
+    return ()=>{ supabase.removeChannel(ch); };
+  },[]);
+
   useEffect(()=>{ if(notif){ const t=setTimeout(()=>sn(null),3000); return()=>clearTimeout(t); } },[notif]);
   const notify=(msg,err=false)=>sn({msg,err});
 
@@ -389,14 +425,40 @@ export default function App() {
   const total=filtered.length;
   const selEntObj=entities.find(e=>e.id===selEnt);
 
-  const saveTask=f=>{ if(taskForm.mode==="edit"){ st(p=>p.map(t=>t.id===f.id?f:t)); if(detail?.id===f.id)sd(f); notify("Tâche modifiée ✓"); } else { const n={...f,id:"t"+uid(),attachments:[],createdAt:Date.now()}; st(p=>[n,...p]); notify("Tâche créée ✓"); } stf(null); };
-  const delTask=id=>{ st(p=>p.filter(t=>t.id!==id)); sd(null); notify("Tâche supprimée"); };
-  const setStatus=(id,s)=>{ st(p=>p.map(t=>t.id===id?{...t,status:s}:t)); if(detail?.id===id)sd(p=>({...p,status:s})); };
-  const addFile=(id,f)=>{ st(p=>p.map(t=>t.id===id?{...t,attachments:[...(t.attachments||[]),f]}:t)); if(detail?.id===id)sd(p=>({...p,attachments:[...(p.attachments||[]),f]})); };
-  const rmFile=(id,fid)=>{ st(p=>p.map(t=>t.id===id?{...t,attachments:(t.attachments||[]).filter(a=>a.id!==fid)}:t)); if(detail?.id===id)sd(p=>({...p,attachments:(p.attachments||[]).filter(a=>a.id!==fid)})); };
-  const addEntity=data=>{ se(p=>[...p,{...data,id:"e"+uid()}]); sef(false); notify("Entité créée ✓"); };
-  const rmEntity=id=>{ se(p=>p.filter(e=>e.id!==id)); st(p=>p.filter(t=>t.entityId!==id)); if(selEnt===id)sse(null); notify("Entité supprimée"); };
+  const saveTask=async f=>{
+    const isEdit=taskForm.mode==="edit";
+    const n=isEdit?f:{...f,id:"t"+uid(),attachments:[],createdAt:Date.now()};
+    st(p=>isEdit?p.map(t=>t.id===n.id?n:t):[n,...p]);
+    if(isEdit&&detail?.id===n.id) sd(n);
+    await dbUpsertTask(n);
+    notify(isEdit?"Tâche modifiée ✓":"Tâche créée ✓");
+    stf(null);
+  };
+  const delTask=async id=>{ st(p=>p.filter(t=>t.id!==id)); sd(null); await dbDeleteTask(id); notify("Tâche supprimée"); };
+  const setStatus=async(id,s)=>{ st(p=>p.map(t=>t.id===id?{...t,status:s}:t)); if(detail?.id===id)sd(p=>({...p,status:s})); await dbUpdateTask(id,{status:s}); };
+  const addFile=async(id,f)=>{
+    const newAtts=tasks.find(t=>t.id===id)?.attachments||[];
+    newAtts.push(f);
+    st(p=>p.map(t=>t.id===id?{...t,attachments:newAtts}:t));
+    if(detail?.id===id)sd(p=>({...p,attachments:newAtts}));
+    await dbUpdateTask(id,{attachments:newAtts});
+  };
+  const rmFile=async(id,fid)=>{
+    const newAtts=(tasks.find(t=>t.id===id)?.attachments||[]).filter(a=>a.id!==fid);
+    st(p=>p.map(t=>t.id===id?{...t,attachments:newAtts}:t));
+    if(detail?.id===id)sd(p=>({...p,attachments:newAtts}));
+    await dbUpdateTask(id,{attachments:newAtts});
+  };
+  const addEntity=async data=>{ const e={...data,id:"e"+uid()}; se(p=>[...p,e]); await dbAddEntity(e); sef(false); notify("Entité créée ✓"); };
+  const rmEntity=async id=>{ se(p=>p.filter(e=>e.id!==id)); st(p=>p.filter(t=>t.entityId!==id)); if(selEnt===id)sse(null); await dbDeleteEntity(id); notify("Entité supprimée"); };
   const doAlert=async(email,msg)=>{ ss(true); try{ await sendGmailAlert(detail,entities.find(e=>e.id===detail.entityId),email,msg); sa(false); notify(`Alerte envoyée à ${email} ✓`); }catch{ notify("Erreur d'envoi — vérifiez Gmail",true); } ss(false); };
+
+  if(loading) return (
+    <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#16202e",flexDirection:"column",gap:12}}>
+      <div style={{fontSize:28,fontWeight:700,color:"#fff"}}>Task<span style={{color:"#3b82f6"}}>Pilot</span></div>
+      <div style={{fontSize:13,color:"#617d97"}}>{supabase?"Connexion à Supabase...":"Chargement..."}</div>
+    </div>
+  );
 
   return (
     <>
@@ -409,16 +471,15 @@ export default function App() {
         @keyframes si{from{transform:translateX(12px);opacity:0}to{transform:none;opacity:1}}
         @keyframes slideUp{from{transform:translateY(100%)}to{transform:none}}
         @keyframes slideRight{from{transform:translateX(-100%)}to{transform:none}}
-        ::-webkit-scrollbar{width:4px;height:4px}
-        ::-webkit-scrollbar-thumb{background:rgba(128,128,128,0.3);border-radius:2px}
+        ::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:rgba(128,128,128,0.3);border-radius:2px}
         select option{background:#1e293b;color:#f1f5f9}
         textarea:focus,input:focus,select:focus{outline:2px solid #10b981!important;border-color:#10b981!important}
         button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
       `}</style>
 
-      <div style={{display:"flex",height:"100vh",overflow:"hidden"}}>
+      {supabase&&<div style={{position:"fixed",top:0,left:0,right:0,background:"#10b981",color:"#fff",fontSize:11,fontWeight:600,textAlign:"center",padding:"4px",zIndex:999,letterSpacing:"0.04em"}}>🟢 SYNC SUPABASE ACTIVE</div>}
 
-        {/* Desktop sidebar */}
+      <div style={{display:"flex",height:"100vh",overflow:"hidden",paddingTop:supabase?22:0}}>
         {!isMobile&&(
           <aside style={{width:230,background:SB.bg,borderRight:`1px solid ${SB.border}`,display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
             <div style={{padding:"18px 18px 14px",borderBottom:`1px solid ${SB.border}`}}>
@@ -428,14 +489,12 @@ export default function App() {
             <div style={{flex:1,overflowY:"auto",padding:"10px 0"}}>
               <div style={{padding:"8px 16px 4px",fontSize:9,fontWeight:600,color:SB.muted,letterSpacing:"0.12em",textTransform:"uppercase"}}>Entités</div>
               <button onClick={()=>sse(null)} style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"9px 16px",background:selEnt===null?SB.active:"transparent",border:"none",borderLeft:selEnt===null?`3px solid ${SB.accent}`:"3px solid transparent",color:selEnt===null?"#fff":SB.text,fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer",textAlign:"left",transition:"all 0.12s"}}>
-                <span>📋</span><span style={{flex:1}}>Toutes les tâches</span>
-                <span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10}}>{tasks.length}</span>
+                <span>📋</span><span style={{flex:1}}>Toutes les tâches</span><span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10}}>{tasks.length}</span>
               </button>
               {entities.map(ent=>(
                 <div key={ent.id} style={{display:"flex",alignItems:"center"}}>
                   <button onClick={()=>sse(ent.id)} style={{display:"flex",alignItems:"center",gap:9,flex:1,padding:"9px 16px",background:selEnt===ent.id?SB.active:"transparent",border:"none",borderLeft:selEnt===ent.id?`3px solid ${ent.color}`:"3px solid transparent",color:selEnt===ent.id?ent.color:SB.text,fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer",textAlign:"left",transition:"all 0.12s"}}>
-                    <span style={{width:7,height:7,borderRadius:"50%",background:ent.color,flexShrink:0}}/>
-                    <span style={{flex:1}}>{ent.icon} {ent.name}</span>
+                    <span style={{width:7,height:7,borderRadius:"50%",background:ent.color,flexShrink:0}}/><span style={{flex:1}}>{ent.icon} {ent.name}</span>
                     <span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10}}>{tasks.filter(t=>t.entityId===ent.id).length}</span>
                   </button>
                   <button onClick={()=>rmEntity(ent.id)} style={{background:"none",border:"none",color:SB.muted,cursor:"pointer",fontSize:15,padding:"4px 10px",opacity:0.6}}>&times;</button>
@@ -444,12 +503,7 @@ export default function App() {
               <button onClick={()=>sef(true)} style={{display:"flex",alignItems:"center",gap:8,width:"calc(100% - 20px)",margin:"8px 10px",padding:"7px 12px",borderRadius:7,cursor:"pointer",background:"transparent",border:`1px dashed ${SB.border}`,color:SB.muted,fontFamily:"Inter,sans-serif",fontSize:12}}>+ Nouvelle entité</button>
             </div>
             <div style={{padding:"10px 12px",borderTop:`1px solid ${SB.border}`,display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-              {STATUSES.map(s=>(
-                <div key={s.id} style={{background:"rgba(255,255,255,0.04)",borderRadius:7,padding:"8px 10px",border:`1px solid ${SB.border}`}}>
-                  <div style={{fontSize:17,fontWeight:700,color:s.clr,lineHeight:1}}>{tasks.filter(t=>t.status===s.id).length}</div>
-                  <div style={{fontSize:9,color:SB.muted,marginTop:3,fontWeight:500}}>{s.label}</div>
-                </div>
-              ))}
+              {STATUSES.map(s=>(<div key={s.id} style={{background:"rgba(255,255,255,0.04)",borderRadius:7,padding:"8px 10px",border:`1px solid ${SB.border}`}}><div style={{fontSize:17,fontWeight:700,color:s.clr,lineHeight:1}}>{tasks.filter(t=>t.status===s.id).length}</div><div style={{fontSize:9,color:SB.muted,marginTop:3,fontWeight:500}}>{s.label}</div></div>))}
             </div>
             <div style={{padding:"12px 16px",borderTop:`1px solid ${SB.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <span style={{fontSize:12,color:SB.muted}}>{dark?"Thème sombre":"Thème clair"}</span>
@@ -460,93 +514,58 @@ export default function App() {
           </aside>
         )}
 
-        {/* Mobile drawer */}
         {isMobile&&<Drawer open={drawerOpen} onClose={()=>sdr(false)} entities={entities} tasks={tasks} selEnt={selEnt} sse={sse} dark={dark} onNewEnt={()=>sef(true)} onDelEnt={rmEntity} setDark={setDark}/>}
 
-        {/* Main */}
         <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",background:T.bg}}>
-          {/* Topbar */}
           <div style={{display:"flex",alignItems:"center",gap:10,padding:isMobile?"10px 14px":"12px 20px",borderBottom:`1px solid ${T.border}`,background:T.surf,flexShrink:0}}>
-            {isMobile&&(
-              <button onClick={()=>sdr(true)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.sub,cursor:"pointer",padding:"8px 11px",fontSize:16,lineHeight:1,flexShrink:0,minHeight:38}}>☰</button>
-            )}
+            {isMobile&&(<button onClick={()=>sdr(true)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.sub,cursor:"pointer",padding:"8px 11px",fontSize:16,lineHeight:1,flexShrink:0,minHeight:38}}>☰</button>)}
             <div style={{flex:1,overflow:"hidden"}}>
-              <div style={{fontSize:isMobile?14:16,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                {selEntObj?`${selEntObj.icon} ${selEntObj.name}`:"Tableau de bord"}
-              </div>
+              <div style={{fontSize:isMobile?14:16,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selEntObj?`${selEntObj.icon} ${selEntObj.name}`:"Tableau de bord"}</div>
               {!isMobile&&<div style={{fontSize:11,color:T.muted,marginTop:1}}>{new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</div>}
             </div>
             <div style={{display:"flex",background:T.bg,borderRadius:7,padding:2,border:`1px solid ${T.border}`,flexShrink:0}}>
-              {["kanban","list"].map(v=>(
-                <button key={v} onClick={()=>sv(v)} style={{padding:isMobile?"6px 10px":"5px 12px",borderRadius:5,border:"none",fontFamily:"Inter,sans-serif",background:view===v?T.surf:"transparent",color:view===v?T.text:T.muted,cursor:"pointer",fontSize:11,fontWeight:view===v?600:400,boxShadow:view===v?"0 1px 3px rgba(0,0,0,0.08)":"none",transition:"all 0.15s"}}>
-                  {v==="kanban"?"Kanban":"Liste"}
-                </button>
-              ))}
+              {["kanban","list"].map(v=>(<button key={v} onClick={()=>sv(v)} style={{padding:isMobile?"6px 10px":"5px 12px",borderRadius:5,border:"none",fontFamily:"Inter,sans-serif",background:view===v?T.surf:"transparent",color:view===v?T.text:T.muted,cursor:"pointer",fontSize:11,fontWeight:view===v?600:400,boxShadow:view===v?"0 1px 3px rgba(0,0,0,0.08)":"none",transition:"all 0.15s"}}>{v==="kanban"?"Kanban":"Liste"}</button>))}
             </div>
-            {!isMobile&&(
-              <button onClick={()=>stf({mode:"create",data:{entityId:selEnt||entities[0]?.id||""}})} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:7,background:"#16202e",color:"#fff",fontWeight:600,fontSize:13,border:"none",cursor:"pointer",fontFamily:"Inter,sans-serif",flexShrink:0}}>+ Nouvelle tâche</button>
-            )}
+            {!isMobile&&(<button onClick={()=>stf({mode:"create",data:{entityId:selEnt||entities[0]?.id||""}})} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 16px",borderRadius:7,background:"#16202e",color:"#fff",fontWeight:600,fontSize:13,border:"none",cursor:"pointer",fontFamily:"Inter,sans-serif",flexShrink:0}}>+ Nouvelle tâche</button>)}
           </div>
 
-          {/* Stats */}
           <div style={{display:"flex",borderBottom:`1px solid ${T.border}`,background:T.surf,flexShrink:0}}>
             {STATUSES.map((s,i)=>{ const cnt=filtered.filter(t=>t.status===s.id).length; const pct=total?Math.round(cnt/total*100):0; return (
               <div key={s.id} style={{flex:1,padding:isMobile?"8px 10px":"12px 20px",borderRight:i<3?`1px solid ${T.border}`:"none"}}>
-                <div style={{display:"flex",alignItems:"baseline",gap:4}}>
-                  <span style={{fontSize:isMobile?18:22,fontWeight:700,color:s.clr,lineHeight:1}}>{cnt}</span>
-                  {!isMobile&&<span style={{fontSize:10,color:T.muted,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.04em"}}>{s.label}</span>}
-                </div>
+                <div style={{display:"flex",alignItems:"baseline",gap:4}}><span style={{fontSize:isMobile?18:22,fontWeight:700,color:s.clr,lineHeight:1}}>{cnt}</span>{!isMobile&&<span style={{fontSize:10,color:T.muted,fontWeight:500,textTransform:"uppercase",letterSpacing:"0.04em"}}>{s.label}</span>}</div>
                 {isMobile&&<div style={{fontSize:9,color:T.muted,marginTop:2,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{s.label}</div>}
                 <div style={{height:3,background:T.border,borderRadius:2,marginTop:5}}><div style={{height:"100%",width:`${pct}%`,background:s.clr,borderRadius:2,transition:"width 0.4s"}}/></div>
               </div>
             );})}
           </div>
 
-          {/* Content */}
           {filtered.length===0?(
             <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:10,background:T.bg,paddingBottom:isMobile?80:0}}>
-              <div style={{fontSize:44}}>📋</div>
-              <div style={{fontSize:16,fontWeight:600,color:T.sub}}>Aucune tâche</div>
-              <div style={{fontSize:13,color:T.muted}}>Créez votre première tâche</div>
+              <div style={{fontSize:44}}>📋</div><div style={{fontSize:16,fontWeight:600,color:T.sub}}>Aucune tâche</div><div style={{fontSize:13,color:T.muted}}>Créez votre première tâche</div>
             </div>
           ):view==="kanban"?<Kanban tasks={filtered} entities={entities} onOpen={sd} dark={dark} isMobile={isMobile}/>:<ListView tasks={filtered} entities={entities} onOpen={sd} dark={dark}/>}
         </div>
       </div>
 
-      {/* Mobile bottom nav */}
       {isMobile&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,background:SB.bg,borderTop:`1px solid ${SB.border}`,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom)",height:60}}>
-          <button onClick={()=>sdr(true)} style={{flex:1,background:"none",border:"none",color:SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}>
-            <span style={{fontSize:16}}>☰</span>Menu
-          </button>
-          <button onClick={()=>sv("kanban")} style={{flex:1,background:"none",border:"none",color:view==="kanban"?"#fff":SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}>
-            <span style={{fontSize:16}}>⊞</span>Kanban
-          </button>
+          <button onClick={()=>sdr(true)} style={{flex:1,background:"none",border:"none",color:SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}><span style={{fontSize:16}}>☰</span>Menu</button>
+          <button onClick={()=>sv("kanban")} style={{flex:1,background:"none",border:"none",color:view==="kanban"?"#fff":SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}><span style={{fontSize:16}}>⊞</span>Kanban</button>
           <button onClick={()=>stf({mode:"create",data:{entityId:selEnt||entities[0]?.id||""}})} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:600}}>
             <span style={{width:40,height:40,borderRadius:"50%",background:"#16202e",border:"2px solid #3b82f6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:"#fff",marginTop:-22,boxShadow:"0 4px 16px rgba(59,130,246,0.35)"}}>+</span>
             <span style={{color:"#3b82f6",marginTop:2}}>Nouveau</span>
           </button>
-          <button onClick={()=>sv("list")} style={{flex:1,background:"none",border:"none",color:view==="list"?"#fff":SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}>
-            <span style={{fontSize:16}}>≡</span>Liste
-          </button>
-          <button onClick={()=>setDark(d=>!d)} style={{flex:1,background:"none",border:"none",color:SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}>
-            <span style={{fontSize:16}}>{dark?"☀️":"🌙"}</span>{dark?"Clair":"Sombre"}
-          </button>
+          <button onClick={()=>sv("list")} style={{flex:1,background:"none",border:"none",color:view==="list"?"#fff":SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}><span style={{fontSize:16}}>≡</span>Liste</button>
+          <button onClick={()=>setDark(d=>!d)} style={{flex:1,background:"none",border:"none",color:SB.muted,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,fontFamily:"Inter,sans-serif",fontSize:9,fontWeight:500}}><span style={{fontSize:16}}>{dark?"☀️":"🌙"}</span>{dark?"Clair":"Sombre"}</button>
         </div>
       )}
 
-      {/* Modals */}
       {taskForm&&<TaskFormModal data={taskForm.data} mode={taskForm.mode} entities={entities} onSave={saveTask} onClose={()=>stf(null)} dark={dark} isMobile={isMobile}/>}
       {detail&&<DetailModal task={detail} entities={entities} onEdit={()=>{stf({mode:"edit",data:{...detail}});sd(null);}} onDelete={()=>delTask(detail.id)} onStatus={s=>setStatus(detail.id,s)} onAddFile={f=>addFile(detail.id,f)} onRemoveFile={id=>rmFile(detail.id,id)} onClose={()=>sd(null)} onAlert={()=>sa(true)} dark={dark} isMobile={isMobile}/>}
       {entForm&&<EntityModal onSave={addEntity} onClose={()=>sef(false)} dark={dark} isMobile={isMobile}/>}
       {alertOpen&&detail&&<AlertModal task={detail} entities={entities} sending={sending} onSend={doAlert} onClose={()=>sa(false)} dark={dark} isMobile={isMobile}/>}
 
-      {/* Toast */}
-      {notif&&(
-        <div style={{position:"fixed",bottom:isMobile?72:22,right:16,left:isMobile?16:undefined,zIndex:500,background:notif.err?"#fef2f2":"#f0fdf4",border:`1px solid ${notif.err?"#fca5a5":"#bbf7d0"}`,borderRadius:10,padding:"11px 16px",fontSize:13,display:"flex",alignItems:"center",gap:9,boxShadow:"0 6px 24px rgba(0,0,0,0.12)",animation:"si 0.2s ease",color:notif.err?"#dc2626":"#15803d",fontWeight:500}}>
-          {notif.err?"⚠️":"✓"} {notif.msg}
-        </div>
-      )}
+      {notif&&(<div style={{position:"fixed",bottom:isMobile?72:22,right:16,left:isMobile?16:undefined,zIndex:500,background:notif.err?"#fef2f2":"#f0fdf4",border:`1px solid ${notif.err?"#fca5a5":"#bbf7d0"}`,borderRadius:10,padding:"11px 16px",fontSize:13,display:"flex",alignItems:"center",gap:9,boxShadow:"0 6px 24px rgba(0,0,0,0.12)",animation:"si 0.2s ease",color:notif.err?"#dc2626":"#15803d",fontWeight:500}}>{notif.err?"⚠️":"✓"} {notif.msg}</div>)}
     </>
   );
 }
