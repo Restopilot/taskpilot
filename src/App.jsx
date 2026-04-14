@@ -165,14 +165,20 @@ function Modal({title,onClose,wide,dark,children,isMobile}) {
   );
 }
 
-// ── Task Card ──────────────────────────────────────────────────────────────────
-function TaskCard({task,ent,onClick,dark}) {
+// ── Task Card (draggable) ──────────────────────────────────────────────────────
+function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging}) {
   const T=mkT(dark), p=PRIORITIES.find(x=>x.id===task.priority), od=isOD(task.dueDate,task.status);
   return (
-    <div onClick={onClick} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"pointer",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none"}}>
+    <div
+      draggable
+      onDragStart={e=>{ e.dataTransfer.setData("taskId",task.id); onDragStart&&onDragStart(); }}
+      onDragEnd={onDragEnd}
+      onClick={onClick}
+      style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.4:1,transition:"opacity 0.15s"}}>
       <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10}}>
         <span style={{width:3,flexShrink:0,minHeight:18,alignSelf:"stretch",borderRadius:4,background:p?.clr||"#ccc",display:"inline-block"}}/>
         <span style={{fontSize:13,fontWeight:500,lineHeight:1.45,flex:1,color:T.text}}>{task.title}</span>
+        <span style={{fontSize:10,color:T.muted,cursor:"grab",flexShrink:0,marginTop:2}}>⠿</span>
       </div>
       {ent&&<div style={{display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:500,background:ent.color+"15",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}25`}}>{ent.icon} {ent.name}</div>}
       <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -184,25 +190,37 @@ function TaskCard({task,ent,onClick,dark}) {
   );
 }
 
-// ── Kanban ─────────────────────────────────────────────────────────────────────
-function Kanban({tasks,entities,onOpen,dark,isMobile}) {
+// ── Kanban (drag & drop) ───────────────────────────────────────────────────────
+function Kanban({tasks,entities,onOpen,dark,isMobile,onStatusChange}) {
   const T=mkT(dark);
+  const [draggingId,setDraggingId]=useState(null);
+  const [overCol,setOverCol]=useState(null);
   return (
     <div style={{display:"flex",flex:1,overflowX:"auto",overflowY:"hidden",WebkitOverflowScrolling:"touch"}}>
-      {STATUSES.map((s,i)=>(
-        <div key={s.id} style={{flexShrink:0,width:isMobile?290:undefined,flex:isMobile?"none":1,display:"flex",flexDirection:"column",borderRight:`1px solid ${T.border}`,minWidth:isMobile?290:190}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px",flexShrink:0,borderBottom:`2px solid ${s.clr}`,background:T.surf}}>
-            <span style={{width:8,height:8,borderRadius:"50%",background:s.clr,display:"inline-block"}}/>
-            <span style={{fontSize:11,fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",color:T.text}}>{s.label}</span>
-            <span style={{marginLeft:"auto",fontSize:11,background:s.clr+"18",color:s.clr,padding:"1px 8px",borderRadius:10,fontWeight:500}}>{tasks.filter(t=>t.status===s.id).length}</span>
+      {STATUSES.map((s,i)=>{
+        const colTasks=tasks.filter(t=>t.status===s.id);
+        const isOver=overCol===s.id;
+        return (
+          <div key={s.id}
+            onDragOver={e=>{ e.preventDefault(); setOverCol(s.id); }}
+            onDragLeave={()=>setOverCol(null)}
+            onDrop={e=>{ e.preventDefault(); const id=e.dataTransfer.getData("taskId"); if(id) onStatusChange(id,s.id); setOverCol(null); setDraggingId(null); }}
+            style={{flexShrink:0,width:isMobile?290:undefined,flex:isMobile?"none":1,display:"flex",flexDirection:"column",borderRight:`1px solid ${T.border}`,minWidth:isMobile?290:190,transition:"background 0.15s",background:isOver?s.clr+"08":undefined}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px",flexShrink:0,borderBottom:`2px solid ${isOver?s.clr:s.clr}`,background:isOver?s.clr+"12":T.surf,transition:"background 0.15s"}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:s.clr,display:"inline-block"}}/>
+              <span style={{fontSize:11,fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase",color:T.text}}>{s.label}</span>
+              <span style={{marginLeft:"auto",fontSize:11,background:s.clr+"18",color:s.clr,padding:"1px 8px",borderRadius:10,fontWeight:500}}>{colTasks.length}</span>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"10px 10px 90px",display:"flex",flexDirection:"column",gap:8,background:T.bg,WebkitOverflowScrolling:"touch",minHeight:80}}>
+              {colTasks.map(t=>(
+                <TaskCard key={t.id} task={t} ent={entities.find(e=>e.id===t.entityId)} onClick={()=>{ if(draggingId) return; onOpen(t); }} dark={dark}
+                  onDragStart={()=>setDraggingId(t.id)} onDragEnd={()=>{ setDraggingId(null); setOverCol(null); }} isDragging={draggingId===t.id}/>
+              ))}
+              {isOver&&draggingId&&<div style={{height:60,borderRadius:10,border:`2px dashed ${s.clr}`,background:s.clr+"08",flexShrink:0}}/>}
+            </div>
           </div>
-          <div style={{flex:1,overflowY:"auto",padding:"10px 10px 90px",display:"flex",flexDirection:"column",gap:8,background:T.bg,WebkitOverflowScrolling:"touch"}}>
-            {tasks.filter(t=>t.status===s.id).map(t=>(
-              <TaskCard key={t.id} task={t} ent={entities.find(e=>e.id===t.entityId)} onClick={()=>onOpen(t)} dark={dark}/>
-            ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -475,6 +493,7 @@ export default function App() {
   };
   const addEntity=async data=>{ const e={...data,id:"e"+uid()}; se(p=>[...p,e]); await dbAddEntity(e); sef(false); notify("Entité créée ✓"); };
   const rmEntity=async id=>{ se(p=>p.filter(e=>e.id!==id)); st(p=>p.filter(t=>t.entityId!==id)); if(selEnt===id)sse(null); await dbDeleteEntity(id); notify("Entité supprimée"); };
+  const reorderEntities=(fromId,toId)=>{ if(fromId===toId) return; se(p=>{ const a=[...p]; const fi=a.findIndex(e=>e.id===fromId); const ti=a.findIndex(e=>e.id===toId); const [m]=a.splice(fi,1); a.splice(ti,0,m); return a; }); };
   const doAlert=async(email,msg)=>{ ss(true); try{ await sendEmail(detail,entities.find(e=>e.id===detail.entityId),email,msg); sa(false); notify(`Alerte envoyée à ${email} ✓`); }catch(e){ notify("Erreur d'envoi : "+e.message,true); } ss(false); };
 
   if(loading) return (
@@ -516,8 +535,13 @@ export default function App() {
                 <span>📋</span><span style={{flex:1}}>Toutes les tâches</span><span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10}}>{tasks.length}</span>
               </button>
               {entities.map(ent=>(
-                <div key={ent.id} style={{display:"flex",alignItems:"center"}}>
-                  <button onClick={()=>sse(ent.id)} style={{display:"flex",alignItems:"center",gap:9,flex:1,padding:"9px 16px",background:selEnt===ent.id?SB.active:"transparent",border:"none",borderLeft:selEnt===ent.id?`3px solid ${ent.color}`:"3px solid transparent",color:selEnt===ent.id?ent.color:SB.text,fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer",textAlign:"left",transition:"all 0.12s"}}>
+                <div key={ent.id} draggable
+                  onDragStart={e=>e.dataTransfer.setData("entId",ent.id)}
+                  onDragOver={e=>e.preventDefault()}
+                  onDrop={e=>{ e.preventDefault(); reorderEntities(e.dataTransfer.getData("entId"),ent.id); }}
+                  style={{display:"flex",alignItems:"center",cursor:"grab"}}>
+                  <span style={{color:SB.muted,fontSize:12,padding:"0 4px 0 10px",cursor:"grab",flexShrink:0}}>⠿</span>
+                  <button onClick={()=>sse(ent.id)} style={{display:"flex",alignItems:"center",gap:9,flex:1,padding:"9px 8px 9px 4px",background:selEnt===ent.id?SB.active:"transparent",border:"none",borderLeft:"none",color:selEnt===ent.id?ent.color:SB.text,fontFamily:"Inter,sans-serif",fontSize:13,cursor:"pointer",textAlign:"left",transition:"all 0.12s"}}>
                     <span style={{width:7,height:7,borderRadius:"50%",background:ent.color,flexShrink:0}}/><span style={{flex:1}}>{ent.icon} {ent.name}</span>
                     <span style={{fontSize:10,background:"rgba(255,255,255,0.08)",color:SB.muted,padding:"1px 7px",borderRadius:10}}>{tasks.filter(t=>t.entityId===ent.id).length}</span>
                   </button>
@@ -567,7 +591,7 @@ export default function App() {
             <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:10,background:T.bg,paddingBottom:isMobile?80:0}}>
               <div style={{fontSize:44}}>📋</div><div style={{fontSize:16,fontWeight:600,color:T.sub}}>Aucune tâche</div><div style={{fontSize:13,color:T.muted}}>Créez votre première tâche</div>
             </div>
-          ):view==="kanban"?<Kanban tasks={filtered} entities={entities} onOpen={sd} dark={dark} isMobile={isMobile}/>:<ListView tasks={filtered} entities={entities} onOpen={sd} dark={dark}/>}
+          ):view==="kanban"?<Kanban tasks={filtered} entities={entities} onOpen={sd} dark={dark} isMobile={isMobile} onStatusChange={(id,s)=>setStatus(id,s)}/>:<ListView tasks={filtered} entities={entities} onOpen={sd} dark={dark}/> }
         </div>
       </div>
 
