@@ -477,9 +477,9 @@ export default function App() {
         button{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
       `}</style>
 
-      {supabase&&<div style={{position:"fixed",top:0,left:0,right:0,background:"#10b981",color:"#fff",fontSize:11,fontWeight:600,textAlign:"center",padding:"4px",zIndex:999,letterSpacing:"0.04em"}}>🟢 SYNC SUPABASE ACTIVE</div>}
+      {supabase&&<div style={{position:"fixed",top:8,right:12,width:6,height:6,borderRadius:"50%",background:"#10b981",zIndex:999,boxShadow:"0 0 0 2px rgba(16,185,129,0.2)"}} title="Supabase connecté"/>}
 
-      <div style={{display:"flex",height:"100vh",overflow:"hidden",paddingTop:supabase?22:0}}>
+      <div style={{display:"flex",height:"100vh",overflow:"hidden",paddingTop:0}}>
         {!isMobile&&(
           <aside style={{width:230,background:SB.bg,borderRight:`1px solid ${SB.border}`,display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
             <div style={{padding:"18px 18px 14px",borderBottom:`1px solid ${SB.border}`}}>
