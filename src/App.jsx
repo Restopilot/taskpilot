@@ -176,17 +176,18 @@ function TaskCard({task,ent,onClick,dark,onDragStart,onDragEnd,isDragging,onDrop
       onDragOver={e=>{ e.preventDefault(); e.stopPropagation(); }}
       onDrop={e=>{ e.preventDefault(); e.stopPropagation(); onDropOnCard&&onDropOnCard(e.dataTransfer.getData("taskId")); }}
       onClick={onClick}
-      style={{background:T.card,border:`2px solid ${isOver?T.blue:T.border}`,borderRadius:10,padding:"13px",cursor:"grab",boxShadow:"0 1px 3px rgba(0,0,0,0.06)",WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"all 0.12s"}}>
-      <div style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:10,pointerEvents:isDragging?"none":"auto"}}>
-        <span style={{width:3,flexShrink:0,minHeight:18,alignSelf:"stretch",borderRadius:4,background:p?.clr||"#ccc",display:"inline-block"}}/>
-        <span style={{fontSize:13,fontWeight:500,lineHeight:1.45,flex:1,color:T.text}}>{task.title}</span>
-        <span style={{fontSize:10,color:T.muted,flexShrink:0,marginTop:2}}>⠿</span>
+      style={{background:T.card,border:`2px solid ${isOver?T.blue:T.border}`,borderRadius:12,padding:"14px 16px",cursor:"grab",boxShadow:`0 2px 8px rgba(0,0,0,${dark?0.2:0.07})`,WebkitTapHighlightColor:"transparent",userSelect:"none",opacity:isDragging?0.35:1,transition:"all 0.12s"}}>
+      <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:10,pointerEvents:isDragging?"none":"auto"}}>
+        <span style={{width:4,flexShrink:0,minHeight:20,alignSelf:"stretch",borderRadius:4,background:p?.clr||"#ccc",display:"inline-block"}}/>
+        <span style={{fontSize:15,fontWeight:600,lineHeight:1.4,flex:1,color:T.text}}>{task.title}</span>
+        <span style={{fontSize:11,color:T.muted,flexShrink:0,marginTop:2}}>⠿</span>
       </div>
-      {ent&&<div style={{pointerEvents:isDragging?"none":"auto",display:"inline-flex",alignItems:"center",gap:4,padding:"3px 9px",borderRadius:5,fontSize:11,fontWeight:500,background:ent.color+"15",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}25`}}>{ent.icon} {ent.name}</div>}
+      {task.desc&&<p style={{fontSize:12,color:T.sub,lineHeight:1.55,margin:"0 0 10px 14px",pointerEvents:isDragging?"none":"auto",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{task.desc}</p>}
+      {ent&&<div style={{pointerEvents:isDragging?"none":"auto",display:"inline-flex",alignItems:"center",gap:4,padding:"3px 10px",borderRadius:5,fontSize:12,fontWeight:600,background:ent.color+"18",color:ent.color,marginBottom:10,border:`1px solid ${ent.color}30`}}>{ent.icon} {ent.name}</div>}
       <div style={{display:"flex",alignItems:"center",gap:8,pointerEvents:isDragging?"none":"auto"}}>
-        {task.dueDate&&<span style={{fontSize:11,color:od?T.red:T.muted}}>{od&&"⚠ "}{fmtDate(task.dueDate)}</span>}
-        {(task.attachments||[]).length>0&&<span style={{fontSize:11,color:T.muted}}>📎 {task.attachments.length}</span>}
-        {task.assignee&&<div style={{marginLeft:"auto",width:26,height:26,borderRadius:"50%",background:ent?.color+"20",border:`1.5px solid ${ent?.color||"#3b82f6"}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:ent?.color||"#3b82f6",flexShrink:0}}>{initials(task.assignee)}</div>}
+        {task.dueDate&&<span style={{fontSize:12,color:od?T.red:T.muted,fontWeight:od?600:400}}>{od&&"⚠ "}{fmtDate(task.dueDate)}</span>}
+        {(task.attachments||[]).length>0&&<span style={{fontSize:12,color:T.muted}}>📎 {task.attachments.length}</span>}
+        {task.assignee&&<div style={{marginLeft:"auto",width:28,height:28,borderRadius:"50%",background:ent?.color+"20",border:`1.5px solid ${ent?.color||"#3b82f6"}40`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:ent?.color||"#3b82f6",flexShrink:0}}>{initials(task.assignee)}</div>}
       </div>
     </div>
   );
@@ -415,7 +416,7 @@ function Drawer({open,onClose,entities,tasks,selEnt,sse,dark,onNewEnt,onDelEnt,s
       <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:400}}/>
       <div style={{position:"fixed",top:0,left:0,bottom:0,width:270,background:SB.bg,zIndex:401,display:"flex",flexDirection:"column",animation:"slideRight 0.22s ease",overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
         <div style={{padding:"20px 18px 14px",borderBottom:`1px solid ${SB.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div><div style={{fontSize:17,fontWeight:700,color:"#fff"}}>Task<span style={{color:"#3b82f6"}}>Pilot</span></div><div style={{fontSize:9,color:SB.muted,letterSpacing:"0.1em",marginTop:3,textTransform:"uppercase"}}>Gestion des tâches</div></div>
+          <div><div style={{fontSize:17,fontWeight:700,color:"#fff"}}>TaskPilot</div><div style={{fontSize:9,color:SB.muted,letterSpacing:"0.1em",marginTop:3,textTransform:"uppercase"}}>Gestion des tâches</div></div>
           <button onClick={onClose} style={{background:"none",border:"none",color:SB.muted,fontSize:22,cursor:"pointer",padding:"4px 8px",minHeight:36}}>&times;</button>
         </div>
         <div style={{flex:1,padding:"10px 0"}}>
@@ -527,7 +528,7 @@ export default function App() {
 
   if(loading) return (
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#16202e",flexDirection:"column",gap:12}}>
-      <div style={{fontSize:28,fontWeight:700,color:"#fff"}}>Task<span style={{color:"#3b82f6"}}>Pilot</span></div>
+      <div style={{fontSize:28,fontWeight:700,color:"#fff"}}>TaskPilot</div>
       <div style={{fontSize:13,color:"#617d97"}}>{supabase?"Connexion à Supabase...":"Chargement..."}</div>
     </div>
   );
@@ -555,7 +556,7 @@ export default function App() {
         {!isMobile&&(
           <aside style={{width:230,background:SB.bg,borderRight:`1px solid ${SB.border}`,display:"flex",flexDirection:"column",flexShrink:0,overflow:"hidden"}}>
             <div style={{padding:"18px 18px 14px",borderBottom:`1px solid ${SB.border}`}}>
-              <div style={{fontSize:17,fontWeight:700,color:"#fff"}}>Task<span style={{color:"#3b82f6"}}>Pilot</span></div>
+              <div style={{fontSize:17,fontWeight:700,color:"#fff"}}>TaskPilot</div>
               <div style={{fontSize:9,color:SB.muted,letterSpacing:"0.1em",marginTop:4,textTransform:"uppercase"}}>Gestion des tâches</div>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"10px 0"}}>
